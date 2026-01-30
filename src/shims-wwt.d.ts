@@ -1,4 +1,5 @@
-import { Color, RenderContext } from "@wwtelescope/engine";
+import { Color, RenderContext, RiseSetDetails } from "@wwtelescope/engine";
+
 
 declare module "@wwtelescope/engine" {
 
@@ -9,6 +10,8 @@ declare module "@wwtelescope/engine" {
   export class AstroCalc {
     // eslint-disable-next-line @typescript-eslint/naming-convention
     static getPlanet(jd: number, planet: number, latitudeRad: number, longitudeRad: number, height: number): { RA: number; dec: number };
+    // 0. Planet: alt = -0.5667, 1. sun alt = -0.8333, 2.  alt = 0.125 // these account for refraction
+    static getRiseTransitSet(jd: number, lat: number, lng: number, ra1: number, dec1: number, ra2: number, dec2: number, ra3: number, dec3: number, type: 0 | 1 | 2): RiseSetDetails;
   }
 
   export class GlyphCache {

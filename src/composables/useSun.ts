@@ -1,12 +1,13 @@
 /* eslint-disable prefer-const */
 import { Ref, ref, computed, isRef, type MaybeRef } from "vue";
 import { Classification, SolarSystemObjects } from "@wwtelescope/engine-types";
-import { Place} from "@wwtelescope/engine";
+import { Place, RiseSetDetails, SpaceTimeController} from "@wwtelescope/engine";
 import { AltAzRad, EquatorialRad, LocationDeg, LocationRad } from "../types";
 import { AstroCalc } from "@wwtelescope/engine";
 import { equatorialToHorizontal, getJulian } from "../utils";
 import { D2R } from "@cosmicds/vue-toolkit";
 import { engineStore } from "@wwtelescope/engine-pinia";
+import { getRiseTransitSet } from "../wwt-hacks";
 type WWTEngineStore = ReturnType<typeof engineStore>;
 
 
@@ -17,6 +18,7 @@ const secondsInterval = 40;
 const MILLISECONDS_PER_INTERVAL = 1000 * secondsInterval;
 const RADIANS_TO_ARCSECONDS = (180 / Math.PI) * 3600; //
 const R2S = RADIANS_TO_ARCSECONDS;
+const MILLISECONDS_PER_HOUR = 1000 * 60 * 60;
 
 type RefOrType<T> = Ref<T> | T;
 
@@ -106,6 +108,97 @@ export function useSun(options: UseSunOptions) {
     return {upperCulmination, lowerCulmination, always: (alwaysAbove ? 'up' :  (alwaysBelow ? 'down' : null)) };
   }
   
+  function toLocalHours(hoursUTC: number) {
+    const offsetHours = selectedTimezoneOffset.value / MILLISECONDS_PER_HOUR;
+    let localHours = hoursUTC + offsetHours;
+    if (localHours < 0) {
+      localHours += 24;
+    } else if (localHours >= 24) {
+      localHours -= 24;
+    }
+    const lh = Math.floor(localHours);
+    const lm = Math.floor((localHours - lh) * 60);
+    return {
+      string: `${lh.toString().padStart(2, '0')}:${lm.toString().padStart(2, '0')}`,
+      h: Math.floor(hoursUTC),
+      m: Math.floor(60 * (hoursUTC - Math.floor(hoursUTC))),
+      s: Math.floor(60 * ((60 * (hoursUTC % 1)) % 1))
+    };
+  }
+
+    
+  function _getAstroCalcSunRiseSet(utc: number) {
+    const date = new Date(utc);
+    const start = new Date();
+    start.setUTCFullYear(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    start.setUTCHours(0, 0, 0, 0);
+    const jd = SpaceTimeController.utcToJulian(start);
+    // jd = _getZeroHourDynamicalTime(jd);
+    const dayBefore = jd - 1;
+    const dayAfter = jd + 1;
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    const sunBefore = AstroCalc.getPlanet(dayBefore, 0, locationRad.value.latitudeRad, locationRad.value.longitudeRad, 0);
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    const sunCurrent = AstroCalc.getPlanet(jd, 0, locationRad.value.latitudeRad, locationRad.value.longitudeRad, 0);
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    const sunAfter = AstroCalc.getPlanet(dayAfter, 0, locationRad.value.latitudeRad, locationRad.value.longitudeRad, 0);
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    const methods = {
+      'wwt': AstroCalc.getRiseTransitSet,
+      'fixed': getRiseTransitSet
+    };
+    let riseSetDetails = {} as RiseSetDetails;
+    let rise = new Date();
+    let set = new Date();
+    for (const methodName in methods) {
+      const method = methods[methodName];
+      console.log(`====== Using method: ${methodName}`);
+      riseSetDetails = method(
+        jd, 
+        locationRad.value.latitudeRad / D2R, 
+        -1.0 * locationRad.value.longitudeRad / D2R,
+        sunBefore.RA, sunBefore.dec,
+        sunCurrent.RA, sunCurrent.dec,
+        sunAfter.RA, sunAfter.dec,
+        1
+      ); 
+        
+      rise = new Date();
+      const riseTime = toLocalHours(riseSetDetails.rise);
+      rise.setUTCFullYear(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+      rise.setUTCHours(riseTime.h, riseTime.m, riseTime.s, 0);
+      
+      set = new Date();
+      const setTime = toLocalHours(riseSetDetails.set);
+      set.setUTCFullYear(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+      set.setUTCHours(setTime.h, setTime.m, setTime.s, 0);
+      
+      // sort them
+      // if (rise.getTime() > set.getTime()) {
+      //   console.log("Swapping rise and set times");
+      //   const temp = rise;
+      //   rise = set;
+      //   set = temp;
+      // }
+      
+      // riseSetDetails.rise = riseUtc;
+      // riseSetDetails.set = setUtc;
+      // console.log("Sun Rise/Set Details:", riseSetDetails);
+      console.log("     Rise time", rise.toLocaleString(undefined, { timeZone: 'UTC' }));
+      // console.log("Transit time", toLocalHours(riseSetDetails.transit).string);
+      console.log("     Set time", set.toLocaleString(undefined, { timeZone: 'UTC' }));
+      console.log(`timezone offset (hours): ${selectedTimezoneOffset.value / MILLISECONDS_PER_HOUR}`);
+    }
+    return {...riseSetDetails, riseUTC: rise.getTime(), setUTC: set.getTime() };
+    
+  }
+
+
+  
   // function that finds at what time the center of the sun will reach a given altitude during the current day to within 15 minutes
   
   function getTimeforSunAlt(altDeg: number, referenceTime?: number, options?: SunAltOptions ): { rising: number | null; setting: number | null; always: 'up' | 'down' | null } {
@@ -115,8 +208,8 @@ export function useSun(options: UseSunOptions) {
     // const minTime = selectedTime.value - (selectedTime.value % MILLISECONDS_PER_DAY) - selectedTimezoneOffset.value + 0.5 * MILLISECONDS_PER_DAY;
     // const maxTime = minTime + 0.5 * MILLISECONDS_PER_DAY;
     
-    const useLimb = options && options.useLimb ? options.useLimb : false;
-    const useRefraction = options && options.useRefraction ? options.useRefraction : false;
+    const useLimb = options && options.useLimb ? options.useLimb : true;
+    const useRefraction = options && options.useRefraction ? options.useRefraction : true;
     
     const rSunDeg = ((0.009291568 / 2) / D2R); // from WWT planets.js // Sun's ang size in AU = it's ang size in Radians
     const extraDeg = (useLimb ? rSunDeg : 0) + (useRefraction ? 0.5667 : 0);
@@ -141,6 +234,7 @@ export function useSun(options: UseSunOptions) {
     console.log(`Lower culmination: ${lowerCulmination * R2S} arcsec`);
 
     
+    _getAstroCalcSunRiseSet(time);
     
     // eslint-disable-next-line prefer-const
     let always: 'up' | 'down' | null = circumstances.always as ('up' | 'down' | null);

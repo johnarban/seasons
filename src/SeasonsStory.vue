@@ -695,7 +695,10 @@ import { resetNSEWText, drawPlanets, renderOneFrame, drawEcliptic, drawSkyOverla
 import { useSun } from "./composables/useSun";
 import { formatInTimeZone } from "date-fns-tz";
 import { sunPlace } from "./horizon_sky";
+import * as wwtlib from "@wwtelescope/engine";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).wwtlib = wwtlib;
 
 type SheetType = "text" | "video";
 type CameraParams = Omit<GotoRADecZoomParams, "instant">;

@@ -30,6 +30,9 @@ import {
   Vector3d,
   WebFile,
   WWTControl,
+  AstroCalc,
+  RiseSetDetails,
+  Util,
 } from "@wwtelescope/engine";
 
 import { drawHorizon, drawSky } from "./horizon_sky";
@@ -433,4 +436,52 @@ export function drawSkyOverlays() {
     if (Settings.get_active().get_showConstellationLabels()) {
         Constellations.drawConstellationNames(this.renderContext, 1, Colors.get_yellow());
     }
+}
+
+import { CAARiseTransitSetFixed } from "./CAARiseTransitSetFixed.js";
+// hacked version of AstroCalc.getRiseTrinsitSet to fix allow setting altitudes manually
+export const getRiseTransitSet = function (jd, lat, lng, ra1, dec1, ra2, dec2, ra3, dec3, type) {
+  var alt = -0.5667; // by default the web engine just uses the refraction corrected altitude
+
+  switch (type) {
+    case 0: 
+      console.log("Warning: getRiseTransitSet called without type, defaulting to -0.5667");
+      alt = -0.5667;
+      break;
+    case 1: // Sun
+      console.log("getRiseTransitSet called for Sun");
+      alt = -0.8333;
+      break;
+    case 2:
+      console.log("getRiseTransitSet called for Moon");
+      alt = 0.125;
+      break;
+  }
+  
+  var RiseTransitSetTime = CAARiseTransitSetFixed.rise(jd, ra1, dec1, ra2, dec2, ra3, dec3, lng, lat, alt);
+  var neverRises = false;
+  if (!RiseTransitSetTime.bValid) {
+    neverRises = Util.sign(lat) !== Util.sign(dec2);
+  }
+  return new RiseSetDetails(RiseTransitSetTime.bValid, RiseTransitSetTime.rise, RiseTransitSetTime.transit, RiseTransitSetTime.set, neverRises);
+};
+
+export function utc2LST(utc: number, longitudeDeg: number): number {
+  const jd = DT.dateToJulian(new Date(utc));
+  const gst = AstroCalc.greenwichSiderealTime(jd);
+  let lst = gst + (longitudeDeg / 15);
+  lst = CT.m24(lst);
+  return lst;
+}
+
+export function lst2UTC(lst: number, longitudeDeg: number, date: Date): number {
+  const jd = DT.dateToJulian(date);
+  const gst = AstroCalc.greenwichSiderealTime(jd);
+  let utc = (lst - gst) * 15 - longitudeDeg;
+  utc = CT.m360(utc);
+  const hours = Math.floor(utc / 15);
+  const minutes = Math.floor((utc - (hours * 15)) * 4);
+  const seconds = Math.floor((((utc - (hours * 15)) * 4) - minutes) * 60);
+  const dateUtc = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hours, minutes, seconds);
+  return dateUtc;
 }
